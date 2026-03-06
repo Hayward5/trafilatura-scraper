@@ -42,6 +42,50 @@ and integrated into [thousands of projects](https://github.com/adbar/trafilatura
 by companies like HuggingFace, IBM, and Microsoft Research as well as institutions like
 the Allen Institute, Stanford, the Tokyo Institute of Technology, and
 the University of Munich.
+## Playwright 網頁動態渲染支援 (Playwright Integration)
+
+本專案是 Trafilatura 的分支版本，特別整合了 **Playwright** 以支援動態網頁渲染。當原始 HTML 內容不完整或被 JavaScript 遮擋時，本工具能自動啟動瀏覽器進行渲染，提升內容擷取的成功率。
+
+### 主要差異與功能
+
+*   **動態渲染支援**：整合 Playwright (Chromium) 處理 JavaScript 密集型網站。
+*   **多種渲染模式**：
+    *   `off` (預設)：不進行渲染，維持與原版一致的高速 HTTP 請求模式。
+    *   `force`：強制所有請求皆透過瀏覽器渲染。
+    *   `on-failure`：僅在標準下載失敗或內容不足時，自動切換至渲染模式。
+    *   `auto`：根據啟發式演算法自動判斷是否需要進行渲染。
+*   **向下相容**：預設模式為 `off`，確保現有流程的效能與相容性。專案保留與上游相同的 HTTP 路徑作為預設值。
+
+### 安裝指南官方推薦使用以下方式安裝 Playwright 及其瀏覽器元件：
+
+```bash
+pip install "trafilatura[playwright]"
+python -m playwright install chromium
+```
+
+### 使用範例
+
+#### 命令列介面 (CLI)
+使用 `--render` 參數指定模式：
+```bash
+trafilatura --render auto -u "https://example.com"
+```
+
+#### Python API
+在 `extract` 函數中傳入 `render` 參數：
+```python
+from trafilatura import extract, fetch_url
+
+url = "https://example.com"
+downloaded = fetch_url(url)
+# 使用自動判定渲染模式
+result = extract(downloaded, render="auto")
+```
+
+### 注意事項
+*   **渲染限制**：動態渲染能解決大部分非同步載入問題，但**並非**保證能繞過所有反爬蟲 (Anti-bot) 機制。
+*   **效能開銷**：啟動瀏覽器渲染會消耗更多系統資源與處理時間，建議僅在必要時使用。
+],op:
 
 
 ### Features
