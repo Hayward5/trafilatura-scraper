@@ -56,7 +56,9 @@ the University of Munich.
     *   `auto`：根據啟發式演算法自動判斷是否需要進行渲染。
 *   **向下相容**：預設模式為 `off`，確保現有流程的效能與相容性。專案保留與上游相同的 HTTP 路徑作為預設值。
 
-### 安裝指南官方推薦使用以下方式安裝 Playwright 及其瀏覽器元件：
+### 安裝指南
+
+官方推薦使用以下方式安裝 Playwright 及其瀏覽器元件：
 
 ```bash
 pip install "trafilatura[playwright]"
@@ -72,20 +74,19 @@ trafilatura --render auto -u "https://example.com"
 ```
 
 #### Python API
-在 `extract` 函數中傳入 `render` 參數：
+在 `fetch_url` 函數中傳入 `render` 參數：
 ```python
 from trafilatura import extract, fetch_url
 
 url = "https://example.com"
-downloaded = fetch_url(url)
-# 使用自動判定渲染模式
-result = extract(downloaded, render="auto")
+# 使用自動判定渲染模式下載網頁
+downloaded = fetch_url(url, render="auto")
+result = extract(downloaded)
 ```
 
 ### 注意事項
 *   **渲染限制**：動態渲染能解決大部分非同步載入問題，但**並非**保證能繞過所有反爬蟲 (Anti-bot) 機制。
 *   **效能開銷**：啟動瀏覽器渲染會消耗更多系統資源與處理時間，建議僅在必要時使用。
-],op:
 
 
 ### Features
