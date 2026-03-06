@@ -587,6 +587,41 @@ def test_probing():
         assert f.getvalue().strip() == url
 
 
+def test_parse_args_render_defaults():
+    """Test render arguments have correct defaults"""
+    testargs = ["", "-u", "https://example.org"]
+    with patch.object(sys, "argv", testargs):
+        args = cli.parse_args(testargs)
+
+    assert args.render == "off"
+    assert args.render_timeout is None
+    assert args.render_parallel is None
+    assert args.render_wait_until == "domcontentloaded"
+
+
+def test_args_to_extractor_has_render_fields():
+    """Test render args are propagated to Extractor options"""
+    testargs = ["", "-u", "https://example.org"]
+    with patch.object(sys, "argv", testargs):
+        args = cli.parse_args(testargs)
+
+    options = settings.args_to_extractor(args)
+    assert options.render == "off"
+    assert isinstance(options.render_timeout, int)
+    assert isinstance(options.render_parallel, int)
+    assert options.render_wait_until == "domcontentloaded"
+
+
+def test_render_flag_help_mentions_modes(capsys):
+    """Test render flag help text includes all modes"""
+    with pytest.raises(SystemExit):
+        with patch.object(sys, "argv", ["", "--help"]):
+            cli.parse_args(["--help"])
+
+    out = capsys.readouterr().out
+    assert "--render" in out
+    assert "off" in out and "force" in out and "on-failure" in out and "auto" in out
+
 if __name__ == "__main__":
     test_parser()
     test_climain()

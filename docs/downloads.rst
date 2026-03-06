@@ -59,9 +59,12 @@ Using the ``fetch_response()`` function instead provides access to more informat
     >>> response = fetch_response('https://www.example.org', decode=True, with_headers=True)
     # headers and html attributes used
 
-.. note::
-    New in version 1.7.0.
+    # use Playwright to render the page (requires installation)
+    >>> response = fetch_response('https://www.example.org', render='force')
+    # available modes: off, force, on-failure, auto
 
+.. note::
+    New in version 1.7.0. Rendering support added in 1.13.0.
 
 Trafilatura-backed parallel threads
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

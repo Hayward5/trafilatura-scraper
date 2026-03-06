@@ -33,8 +33,24 @@ URLs can be used directly (``-u/--URL``):
     # outputs main text with basic XML structure ...
     $ trafilatura --xml --URL "https://github.blog/2019-03-29-leader-spotlight-erin-spiceland/"
 
-    # displays help message
     $ trafilatura -h
+
+Optional render mode (requires Playwright):
+
+.. code-block:: bash
+
+    # forces rendering (requires chromium installed)
+    $ trafilatura --render force -u "https://www.example.org"
+
+Additional components are required for rendering:
+
+.. code-block:: bash
+
+    $ pip install trafilatura[playwright]
+    $ python -m playwright install chromium
+
+    $ trafilatura --render force -u "https://www.example.org"
+
 
 
 You can also pipe a HTML document (and response body) to trafilatura:
@@ -381,4 +397,12 @@ Format:
   --xml                 shorthand for XML output
   --xmltei              shorthand for XML TEI output
   --validate-tei        validate XML TEI output
+
+Rendering:
+  Browser automation (requires playwright)
+
+.. code-block:: bash
+
+  --render {off,force,on-failure,auto}
+                        rendering mode (default: off)
 

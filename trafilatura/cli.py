@@ -87,6 +87,28 @@ def add_args(parser: Any) -> Any:
     group3.add_argument('--url-filter',
                         help="only process/output URLs containing these patterns (space-separated strings)",
                         nargs='+', type=str)
+    group3.add_argument(
+        "--render",
+        choices=["off", "force", "on-failure", "auto"],
+        default="off",
+        help="render strategy for JavaScript-heavy pages (off, force, on-failure, auto)",
+    )
+    group3.add_argument(
+        "--render-timeout",
+        type=int,
+        help="render timeout in milliseconds",
+    )
+    group3.add_argument(
+        "--render-parallel",
+        type=int,
+        help="maximum concurrent browser renders",
+    )
+    group3.add_argument(
+        "--render-wait-until",
+        choices=["domcontentloaded", "load", "networkidle"],
+        default="domcontentloaded",
+        help="Playwright wait_until condition for page rendering",
+    )
     #group3.add_argument('--no-ssl',
     #                    help="Disable secure connections (to prevent SSLError)",
     #                    action="store_true")

@@ -93,6 +93,8 @@ trafilatura = "trafilatura.cli:main"
 
 # Development extras
 [project.optional-dependencies]
+# playwright: install chromium
+playwright = ["playwright >= 1.40.0, < 2"]
 dev = [
     "flake8",
     "mypy",
@@ -106,6 +108,7 @@ all = [
     "cchardet >= 2.1.7; python_version < '3.11'",  # build issue
     "faust-cchardet >= 2.1.19; python_version >= '3.11'",
     "htmldate[speed] >= 1.9.2",
+    "playwright >= 1.40.0, < 2",
     "py3langid >= 0.3.0",
     "pycurl >= 7.45.3",
     "urllib3[socks]",
@@ -114,3 +117,6 @@ all = [
 
 [tool.pytest.ini_options]
 testpaths = "tests/*test*.py"
+markers = [
+  "playwright: tests requiring Playwright and browser binaries",
+]

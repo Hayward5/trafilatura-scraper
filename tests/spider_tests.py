@@ -290,6 +290,26 @@ def test_robots():
     # assert not rules.can_fetch("*", "https://example.org/private")
 
 
+def test_probe_alternative_homepage_passes_render():
+    """Test that probe_alternative_homepage passes render parameter to fetch_response."""
+    from unittest.mock import patch
+    from trafilatura.downloads import Response
+    
+    seen = {"render": None}
+
+    def fake_fetch_response(url, **kwargs):
+        seen["render"] = kwargs.get("render")
+        return Response(b"<html><body>ok</body></html>", 200, url)
+
+    def fake_refresh_detection(html, homepage, render="off"):
+        return html, homepage
+
+    with patch('trafilatura.spider.fetch_response', fake_fetch_response), \
+         patch('trafilatura.spider.refresh_detection', fake_refresh_detection):
+        
+        spider.probe_alternative_homepage("https://example.org", render="force")
+        assert seen["render"] == "force"
+
 if __name__ == "__main__":
     test_redirections()
     test_meta_redirections()

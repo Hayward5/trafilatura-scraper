@@ -276,7 +276,241 @@ def test_queue():
     results = download_queue_processing(url_store, args, -1, options)
     assert len(results[0]) == 5 and results[1] is -1
 
+def test_fetch_response_render_force_uses_browser():
+    """Test that fetch_response uses browser path when render='force'."""
+    from unittest.mock import Mock
+    
+    # Patch both send functions to isolate browser path
+    with patch('trafilatura.downloads._send_urllib_request') as mock_urllib, \
+         patch('trafilatura.downloads._send_pycurl_request') as mock_pycurl, \
+         patch('trafilatura.downloads._send_browser_request') as mock_browser:
+        
+        # Browser should return Response-like object
+        mock_browser.return_value = Response(b"<html>rendered</html>", 200, "https://example.org")
+        
+        # Call with render='force'
+        response = trafilatura.downloads.fetch_response(
+            "https://example.org",
+            render="force",
+            config=DEFAULT_CONFIG
+        )
+        
+        # Assert browser path was used
+        mock_browser.assert_called_once()
+        mock_urllib.assert_not_called()
+        mock_pycurl.assert_not_called()
+        
+        # Assert response is correct
+        assert response is not None
+        assert response.data == b"<html>rendered</html>"
+        assert response.status == 200
 
+
+
+
+def test_fetch_response_render_off_keeps_http_path():
+    """Test that fetch_response uses HTTP path when render='off' or None."""
+    from unittest.mock import Mock
+    
+    # Patch both send functions and browser
+    with patch('trafilatura.downloads._send_urllib_request') as mock_urllib, \
+         patch('trafilatura.downloads._send_pycurl_request') as mock_pycurl, \
+         patch('trafilatura.downloads._send_browser_request') as mock_browser:
+        
+        # HTTP path should return Response
+        mock_urllib.return_value = Response(b"<html>http content</html>", 200, "https://example.org")
+        mock_pycurl.return_value = Response(b"<html>http content</html>", 200, "https://example.org")
+        
+        # Test render='off'
+        response = trafilatura.downloads.fetch_response(
+            "https://example.org",
+            render="off",
+            config=DEFAULT_CONFIG
+        )
+        
+        # Browser should not be used
+        mock_browser.assert_not_called()
+        # One of the HTTP methods should be called (depends on HAS_PYCURL)
+        assert mock_urllib.called or mock_pycurl.called
+        assert response is not None
+        assert response.data == b"<html>http content</html>"
+        
+        # Reset mocks
+        mock_urllib.reset_mock()
+        mock_pycurl.reset_mock()
+        mock_browser.reset_mock()
+        
+        # Test render=None (default)
+        response = trafilatura.downloads.fetch_response(
+            "https://example.org",
+            config=DEFAULT_CONFIG
+        )
+        
+        # Browser should not be used
+        mock_browser.assert_not_called()
+        # One of the HTTP methods should be called
+        assert mock_urllib.called or mock_pycurl.called
+
+
+def test_buffered_response_downloads_passes_render_options():
+    """Test that buffered_response_downloads passes render mode from options to fetch_response."""
+    from trafilatura.downloads import buffered_response_downloads
+    from trafilatura.settings import Extractor
+    
+    seen = {"render": None}
+
+    def fake_fetch_response(url, **kwargs):
+        seen["render"] = kwargs.get("render")
+        return Response(b"<html></html>", 200, url)
+
+    with patch('trafilatura.downloads.fetch_response', fake_fetch_response):
+        options = Extractor(config=DEFAULT_CONFIG, render="force")
+        
+        list(buffered_response_downloads(["https://example.org"], 1, options=options))
+        assert seen["render"] == "force"
+
+
+def test_fetch_response_on_failure_falls_back_to_browser():
+    """Test that on-failure mode falls back to browser for 503, None, or 408 HTTP responses."""
+    from unittest.mock import Mock
+    
+    # Patch both send functions to simulate server error
+    with patch('trafilatura.downloads._send_urllib_request') as mock_urllib, \
+         patch('trafilatura.downloads._send_pycurl_request') as mock_pycurl, \
+         patch('trafilatura.downloads._send_browser_request') as mock_browser:
+        
+        # HTTP returns 503 error
+        mock_urllib.return_value = Response(b"", 503, "https://example.org")
+        mock_pycurl.return_value = Response(b"", 503, "https://example.org")
+        
+        # Browser returns success
+        mock_browser.return_value = Response(b"<html>ok</html>", 200, "https://example.org")
+        
+        # Call with render='on-failure'
+        response = trafilatura.downloads.fetch_response(
+            "https://example.org",
+            render="on-failure",
+            config=DEFAULT_CONFIG
+        )
+        
+        # Assert HTTP was tried first, then browser fallback
+        assert mock_urllib.called or mock_pycurl.called
+        mock_browser.assert_called_once()
+        
+        # Assert browser response returned
+        assert response is not None
+        assert response.status == 200
+        assert response.data == b"<html>ok</html>"
+
+
+def test_fetch_response_on_failure_does_not_fallback_for_429():
+    """Test that on-failure mode does NOT fall back to browser for 429 or other non-qualifying statuses."""
+    from unittest.mock import Mock
+    
+    # Patch both send functions to simulate rate limit
+    with patch('trafilatura.downloads._send_urllib_request') as mock_urllib, \
+         patch('trafilatura.downloads._send_pycurl_request') as mock_pycurl, \
+         patch('trafilatura.downloads._send_browser_request') as mock_browser:
+        
+        # HTTP returns 429 rate limit
+        mock_urllib.return_value = Response(b"", 429, "https://example.org")
+        mock_pycurl.return_value = Response(b"", 429, "https://example.org")
+        
+        # Call with render='on-failure'
+        response = trafilatura.downloads.fetch_response(
+            "https://example.org",
+            render="on-failure",
+            config=DEFAULT_CONFIG
+        )
+        
+        # Assert HTTP was tried but browser fallback was NOT used
+        assert mock_urllib.called or mock_pycurl.called
+        mock_browser.assert_not_called()
+        
+        # Assert original 429 response returned (no fallback)
+        assert response is not None
+        assert response.status == 429
+
+
+def test_auto_mode_detects_js_shell_and_fallbacks():
+    """Test that auto mode detects JS shell and falls back to browser."""
+    from unittest.mock import Mock
+    
+    # Patch both send functions to simulate JS shell response
+    with patch('trafilatura.downloads._send_urllib_request') as mock_urllib, \
+         patch('trafilatura.downloads._send_pycurl_request') as mock_pycurl, \
+         patch('trafilatura.downloads._send_browser_request') as mock_browser:
+        
+        # HTTP returns empty shell with typical JS app markers
+        js_shell_html = b"""<!DOCTYPE html>
+<html>
+<head><title>App</title></head>
+<body>
+  <div id="root"></div>
+  <div id="app"></div>
+  <script src="bundle.js"></script>
+</body>
+</html>"""
+        mock_urllib.return_value = Response(js_shell_html, 200, "https://example.org")
+        mock_pycurl.return_value = Response(js_shell_html, 200, "https://example.org")
+        
+        # Browser returns rendered content
+        mock_browser.return_value = Response(b"<html><body><p>Rendered content</p></body></html>", 200, "https://example.org")
+        
+        # Call with render='auto'
+        response = trafilatura.downloads.fetch_response(
+            "https://example.org",
+            render="auto",
+            config=DEFAULT_CONFIG
+        )
+        
+        # Assert HTTP was tried first, then browser fallback
+        assert mock_urllib.called or mock_pycurl.called
+        mock_browser.assert_called_once()
+        
+        # Assert browser response returned
+        assert response is not None
+        assert b"Rendered content" in response.data
+
+
+def test_auto_mode_keeps_http_when_not_js_shell():
+    """Test that auto mode keeps HTTP response when it's not a JS shell (has real content)."""
+    from unittest.mock import Mock
+    
+    # Patch both send functions to simulate normal response
+    with patch('trafilatura.downloads._send_urllib_request') as mock_urllib, \
+         patch('trafilatura.downloads._send_pycurl_request') as mock_pycurl, \
+         patch('trafilatura.downloads._send_browser_request') as mock_browser:
+        
+        # HTTP returns normal page with article-like content
+        normal_html = b"""<!DOCTYPE html>
+<html>
+<head><title>Article Title</title></head>
+<body>
+  <article>
+    <h1>Article Heading</h1>
+    <p>This is a paragraph with real content. Articles contain meaningful text.</p>
+    <p>Another paragraph with more content to ensure this is a real article.</p>
+  </article>
+</body>
+</html>"""
+        mock_urllib.return_value = Response(normal_html, 200, "https://example.org")
+        mock_pycurl.return_value = Response(normal_html, 200, "https://example.org")
+        
+        # Call with render='auto'
+        response = trafilatura.downloads.fetch_response(
+            "https://example.org",
+            render="auto",
+            config=DEFAULT_CONFIG
+        )
+        
+        # Assert HTTP was tried, browser NOT called
+        assert mock_urllib.called or mock_pycurl.called
+        mock_browser.assert_not_called()
+        
+        # Assert HTTP response returned (not browser)
+        assert response is not None
+        assert b"Article Heading" in response.data
 if __name__ == '__main__':
     test_response_object()
     test_is_live_page()

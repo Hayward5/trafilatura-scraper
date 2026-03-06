@@ -94,7 +94,7 @@ class CrawlParameters:
 
 
 def refresh_detection(
-    htmlstring: str, homepage: str
+    htmlstring: str, homepage: str, render: str = "off"
 ) -> Tuple[Optional[str], Optional[str]]:
     "Check if there could be a redirection by meta-refresh tag."
     if '"refresh"' not in htmlstring and '"REFRESH"' not in htmlstring:
@@ -122,7 +122,7 @@ def refresh_detection(
         base_url = get_base_url(url2)
         url2 = fix_relative_urls(base_url, url2)
     # second fetch
-    newhtmlstring = fetch_url(url2)
+    newhtmlstring = fetch_url(url2, render=render)
     if newhtmlstring is None:
         logging.warning("failed redirect: %s", url2)
         return None, None
@@ -132,10 +132,10 @@ def refresh_detection(
 
 
 def probe_alternative_homepage(
-    homepage: str,
+    homepage: str, render: str = "off"
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     "Check if the homepage is redirected and return appropriate values."
-    response = fetch_response(homepage, decode=False)
+    response = fetch_response(homepage, decode=False, render=render)
     if not response or not response.data:
         return None, None, None
 
@@ -148,7 +148,7 @@ def probe_alternative_homepage(
     htmlstring = decode_file(response.data)
 
     # is there a meta-refresh on the page?
-    new_htmlstring, new_homepage = refresh_detection(htmlstring, homepage)
+    new_htmlstring, new_homepage = refresh_detection(htmlstring, homepage, render=render)
     if new_homepage is None:  # malformed or malicious content
         return None, None, None
 
@@ -252,6 +252,7 @@ def init_crawl(
     todo: Optional[List[str]] = None,
     known: Optional[List[str]] = None,
     prune_xpath: Optional[str] = None,
+    render: str = "off",
 ) -> CrawlParameters:
     """Initialize crawl by setting variables, copying values to the
     URL store and retrieving the initial page if the crawl starts."""
@@ -265,7 +266,7 @@ def init_crawl(
     # visiting the start page if necessary
     if not todo:
         URL_STORE.add_urls(urls=[params.start], visited=False)
-        params = crawl_page(params, initial=True)
+        params = crawl_page(params, initial=True, render=render)
     else:
         params.update_metadata(URL_STORE)
 
@@ -275,6 +276,7 @@ def init_crawl(
 def crawl_page(
     params: CrawlParameters,
     initial: bool = False,
+    render: str = "off",
 ) -> CrawlParameters:
     """Examine a webpage, extract navigation links and links."""
     # config=DEFAULT_CONFIG
@@ -288,14 +290,14 @@ def crawl_page(
 
     if initial:
         # probe and process homepage
-        htmlstring, homepage, new_base_url = probe_alternative_homepage(url)
+        htmlstring, homepage, new_base_url = probe_alternative_homepage(url, render=render)
         if htmlstring and homepage and new_base_url:
             # register potentially new homepage
             URL_STORE.add_urls([homepage])
             # extract links on homepage
             process_links(htmlstring, params, url=url)
     else:
-        response = fetch_response(url, decode=False)
+        response = fetch_response(url, decode=False, render=render)
         process_response(response, params)
 
     # optional backup of gathered pages without nav-pages ? ...

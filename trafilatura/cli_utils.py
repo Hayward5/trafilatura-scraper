@@ -372,7 +372,7 @@ def cli_crawler(
             startpage = spider.URL_STORE.get_url(hostname, as_visited=False)
             if startpage:
                 param_dict[hostname] = spider.init_crawl(
-                    startpage, lang=args.target_language
+                    startpage, lang=args.target_language, render=options.render
                 )
             # update info
             # TODO: register changes?

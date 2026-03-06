@@ -96,6 +96,11 @@ class Extractor:
         "date_params",
         "author_blacklist",
         "url_blacklist",
+        # render
+        "render",
+        "render_timeout",
+        "render_parallel",
+        "render_wait_until",
     ]
 
     def __init__(
@@ -121,6 +126,10 @@ class Extractor:
         author_blacklist: Optional[Set[str]] = None,
         url_blacklist: Optional[Set[str]] = None,
         date_params: Optional[Dict[str, str]] = None,
+        render: str = "off",
+        render_timeout: Optional[int] = None,
+        render_parallel: Optional[int] = None,
+        render_wait_until: str = "domcontentloaded",
     ):
         self._set_source(url, source)
         self._set_format(output_format)
@@ -151,6 +160,26 @@ class Extractor:
             self.config.getboolean("DEFAULT", "EXTENSIVE_DATE_SEARCH")
         )
         self.max_tree_size = None
+        # render fields with config fallbacks
+        self.render: str = render
+        self.render_timeout: int = (
+            render_timeout
+            if render_timeout is not None
+            else config.getint(
+                "DEFAULT",
+                "RENDER_TIMEOUT",
+                fallback=config.getint("DEFAULT", "DOWNLOAD_TIMEOUT", fallback=30) * 1000,
+            )
+        )
+        self.render_parallel: int = (
+            render_parallel
+            if render_parallel is not None
+            else config.getint("DEFAULT", "RENDER_PARALLEL", fallback=2)
+        )
+        self.render_wait_until: str = (
+            render_wait_until
+            or config.get("DEFAULT", "RENDER_WAIT_UNTIL", fallback="domcontentloaded")
+        )
 
     def _set_source(self, url: Optional[str], source: Optional[str]) -> None:
         "Set the source attribute in a robust way."
@@ -188,6 +217,10 @@ def args_to_extractor(args: Any, url: Optional[str] = None) -> Extractor:
         with_metadata=args.with_metadata,
         only_with_metadata=args.only_with_metadata,
         tei_validation=args.validate_tei,
+        render=args.render,
+        render_timeout=args.render_timeout,
+        render_parallel=args.render_parallel,
+        render_wait_until=args.render_wait_until,
     )
     for attr in ("fast", "images", "links"):
         setattr(options, attr, getattr(args, attr))

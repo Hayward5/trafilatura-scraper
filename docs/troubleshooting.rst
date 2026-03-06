@@ -36,9 +36,15 @@ While downloading and processing raw HTML documents is much faster, it can be ne
 
 In such cases the way to go is to use a browser automation library like Playwright. For available alternatives see this `list of headless browsers <https://github.com/dhamaniasad/HeadlessBrowsers>`_.
 
-For more refined masking and automation methods, see the `nodriver <https://github.com/ultrafunkamsterdam/nodriver>`_ and `browserforge <https://github.com/daijro/browserforge>`_ packages.
+To use Playwright with Trafilatura, install the optional dependency and a browser:
 
+.. code-block:: bash
 
+    $ pip install trafilatura[playwright]
+    $ python -m playwright install chromium
+
+.. note::
+    While rendering can help bypass some simple barriers, it does not guarantee a bypass of advanced anti-bot protections. (Note: does not guarantee bypass)
 
 Bypassing paywalls
 ^^^^^^^^^^^^^^^^^^

@@ -260,11 +260,138 @@ def _handle_response(
     return None
 
 
+
+
+def _looks_like_js_shell(response: Response) -> bool:
+    """Heuristic to detect if HTTP response is a JS shell requiring browser rendering.
+    
+    Conservative check: returns True only when shell markers present AND article-like content absent.
+    This avoids over-rendering real pages that happen to use <div id='root'>.
+    
+    Args:
+        response: Response object with HTML content.
+    
+    Returns:
+        True if response looks like an empty JS shell, False otherwise.
+    """
+    # Decode HTML to text for pattern matching
+    try:
+        html_text = response.data.decode('utf-8', errors='ignore').lower()
+    except Exception:
+        return False  # Can't decode, assume not JS shell
+    
+    # Check for typical JS shell div IDs (root, app, etc.)
+    shell_markers = [
+        'id="root"', "id='root'",
+        'id="app"', "id='app'",
+        'id="__next"', "id='__next'"  # Next.js
+    ]
+    has_shell_marker = any(marker in html_text for marker in shell_markers)
+    
+    if not has_shell_marker:
+        return False  # No shell markers, not a JS shell
+    
+    # Check for article-like content (headings, paragraphs with substantial text)
+    # If we find real content, it's NOT a JS shell even if it has shell divs
+    article_indicators = [
+        '<article', '<p>', '<h1>', '<h2>', '<h3>',
+    ]
+    has_content = any(indicator in html_text for indicator in article_indicators)
+    
+    # Additional check: count text content outside script/style tags
+    # JS shells have very little visible text
+    import re
+    # Remove script and style content
+    text_only = re.sub(r'<script[^>]*>.*?</script>', '', html_text, flags=re.DOTALL)
+    text_only = re.sub(r'<style[^>]*>.*?</style>', '', text_only, flags=re.DOTALL)
+    # Remove HTML tags
+    text_only = re.sub(r'<[^>]+>', '', text_only)
+    # Count non-whitespace characters
+    text_length = len(text_only.strip())
+    
+    # If we have shell markers, but also real content (>100 chars visible text or article tags), keep HTTP
+    if has_content or text_length > 100:
+        return False
+    
+    # Has shell markers, minimal content → likely JS shell
+    return True
+
+def _send_browser_request(
+    url: str,
+    no_ssl: bool,
+    with_headers: bool,
+    config: ConfigParser,
+    render_timeout: Optional[int] = None,
+    render_wait_until: Optional[str] = None,
+    render_parallel: Optional[int] = None,
+) -> Optional[Response]:
+    """Use browser rendering backend to fetch page content.
+    
+    Bridges to trafilatura.browser.render_page and returns Response object.
+    
+    Args:
+        url: URL of the page to fetch.
+        no_ssl: Don't verify SSL certificate.
+        with_headers: Keep track of response headers (ignored for browser path).
+        config: Configuration for user-agent extraction.
+        render_timeout: Browser timeout in milliseconds (overrides config).
+        render_wait_until: Wait condition (overrides config).
+        render_parallel: Browser concurrency limit (overrides config).
+    """
+    from . import browser
+    
+    # Use explicit parameters or fall back to config
+    timeout = render_timeout if render_timeout is not None else config.getint("DEFAULT", "RENDER_TIMEOUT", fallback=30000)
+    wait_until = render_wait_until if render_wait_until is not None else config.get("DEFAULT", "RENDER_WAIT_UNTIL", fallback="domcontentloaded")
+    
+    # Get render_parallel for semaphore
+    parallel_limit = render_parallel if render_parallel is not None else config.getint("DEFAULT", "RENDER_PARALLEL", fallback=2)
+    semaphore = browser.get_semaphore(parallel_limit)
+    
+    # Get MAX_FILE_SIZE for guard
+    max_file_size = config.getint("DEFAULT", "MAX_FILE_SIZE", fallback=20000000)
+    
+    try:
+        # Get user agent from config headers
+        headers = _determine_headers(config)
+        user_agent = headers.get("User-Agent")
+        
+        # Acquire semaphore to limit parallel browser operations
+        with semaphore:
+            # Call browser backend
+            html_bytes, status_code, final_url = browser.render_page(
+                url=url,
+                timeout=timeout,
+                wait_until=wait_until,
+                user_agent=user_agent,
+                no_ssl=no_ssl
+            )
+        
+        # Enforce MAX_FILE_SIZE guard
+        if len(html_bytes) > max_file_size:
+            LOGGER.warning("Rendered HTML exceeds MAX_FILE_SIZE (%d > %d): %s", 
+                          len(html_bytes), max_file_size, url)
+            return None
+        
+        # Create Response object matching existing pattern
+        resp = Response(html_bytes, status_code, final_url)
+        
+        # Note: browser rendering doesn't provide response headers easily,
+        # so with_headers parameter is ignored for browser path
+        
+        return resp
+        
+    except Exception as err:
+        LOGGER.error("browser request error: %s %s", url, err)
+        return None
+
+
 def fetch_url(
     url: str,
     no_ssl: bool = False,
     config: ConfigParser = DEFAULT_CONFIG,
     options: Optional[Extractor] = None,
+    render: Optional[str] = None,
 ) -> Optional[str]:
     """Downloads a web page and seamlessly decodes the response.
 
@@ -273,13 +400,14 @@ def fetch_url(
         no_ssl: Do not try to establish a secure connection (to prevent SSLError).
         config: Pass configuration values for output control.
         options: Extraction options (supersedes config).
+        render: Render mode ('off', 'force', 'on-failure', 'auto'). None defaults to 'off'.
 
     Returns:
         Unicode string or None in case of failed downloads and invalid results.
 
     """
     config = options.config if options else config
-    response = fetch_response(url, decode=True, no_ssl=no_ssl, config=config)
+    response = fetch_response(url, decode=True, no_ssl=no_ssl, config=config, options=options, render=render)
     if response and response.data:
         if not options:
             options = Extractor(config=config)
@@ -295,6 +423,8 @@ def fetch_response(
     no_ssl: bool = False,
     with_headers: bool = False,
     config: ConfigParser = DEFAULT_CONFIG,
+    options: Optional[Extractor] = None,
+    render: Optional[str] = None,
 ) -> Optional[Response]:
     """Downloads a web page and returns a full response object.
 
@@ -304,19 +434,105 @@ def fetch_response(
         no_ssl: Don't try to establish a secure connection (to prevent SSLError).
         with_headers: Keep track of the response headers.
         config: Pass configuration values for output control.
+        options: Extraction options (supersedes config for render settings).
+        render: Render mode ('off', 'force', 'on-failure', 'auto'). None uses options/config.
 
     Returns:
         Response object or None in case of failed downloads and invalid results.
 
     """
-    dl_function = _send_urllib_request if not HAS_PYCURL else _send_pycurl_request
-    LOGGER.debug("sending request: %s", url)
-    response = dl_function(url, no_ssl, with_headers, config)  # Response
-    if not response:  # None or ""
-        LOGGER.debug("request failed: %s", url)
-        return None
-    response.decode_data(decode)
-    return response
+    # Resolve config from options if provided
+    if options:
+        config = options.config
+    
+    # Resolve render mode: explicit arg > options.render > config RENDER_MODE > 'off'
+    if render is None:
+        if options and hasattr(options, 'render') and options.render:
+            render = options.render
+        else:
+            render = config.get("DEFAULT", "RENDER_MODE", fallback="off")
+    
+    # Resolve render timeout, wait_until, and parallel from options or config
+    render_timeout = None
+    render_wait_until = None
+    render_parallel = None
+    # Extract render settings for force/on-failure/auto modes
+    if render in ("force", "on-failure", "auto"):
+        if options and hasattr(options, 'render_timeout'):
+            render_timeout = options.render_timeout
+        if options and hasattr(options, 'render_wait_until'):
+            render_wait_until = options.render_wait_until
+        if options and hasattr(options, 'render_parallel'):
+            render_parallel = options.render_parallel
+    # Route based on render mode
+    if render == "force":
+        # Force browser rendering
+        dl_function = lambda u, ns, wh, c: _send_browser_request(u, ns, wh, c, render_timeout, render_wait_until, render_parallel)
+        LOGGER.debug("sending request: %s", url)
+        response = dl_function(url, no_ssl, with_headers, config)
+        if not response:
+            LOGGER.debug("request failed: %s", url)
+            return None
+        response.decode_data(decode)
+        return response
+    
+    elif render == "on-failure":
+        # Try HTTP first, fallback to browser on qualifying failures
+        dl_function = _send_urllib_request if not HAS_PYCURL else _send_pycurl_request
+        LOGGER.debug("sending request: %s", url)
+        http_response = dl_function(url, no_ssl, with_headers, config)
+        
+        # Check if fallback needed: None, 408, or status >= 500
+        should_fallback = (
+            http_response is None or 
+            http_response.status == 408 or 
+            http_response.status >= 500
+        )
+        
+        if should_fallback:
+            LOGGER.debug("HTTP failed with status %s, falling back to browser: %s", 
+                        http_response.status if http_response else None, url)
+            response = _send_browser_request(url, no_ssl, with_headers, config, render_timeout, render_wait_until, render_parallel)
+        else:
+            response = http_response
+        
+        if not response:
+            LOGGER.debug("request failed: %s", url)
+            return None
+        response.decode_data(decode)
+        return response
+    
+    elif render == "auto":
+        # Try HTTP first, check heuristic, fallback to browser if looks like JS shell
+        dl_function = _send_urllib_request if not HAS_PYCURL else _send_pycurl_request
+        LOGGER.debug("sending request: %s", url)
+        http_response = dl_function(url, no_ssl, with_headers, config)
+        
+        # Check if HTTP response looks like JS shell
+        should_fallback = http_response and _looks_like_js_shell(http_response)
+        
+        if should_fallback:
+            LOGGER.debug("HTTP response looks like JS shell, falling back to browser: %s", url)
+            response = _send_browser_request(url, no_ssl, with_headers, config, render_timeout, render_wait_until, render_parallel)
+        else:
+            response = http_response
+        
+        if not response:
+            LOGGER.debug("request failed: %s", url)
+            return None
+        response.decode_data(decode)
+        return response
+    
+    else:
+        # Default HTTP path (render='off', None, or other future modes)
+        dl_function = _send_urllib_request if not HAS_PYCURL else _send_pycurl_request
+        LOGGER.debug("sending request: %s", url)
+        response = dl_function(url, no_ssl, with_headers, config)
+        if not response:
+            LOGGER.debug("request failed: %s", url)
+            return None
+        response.decode_data(decode)
+        return response
 
 
 def _pycurl_is_live_page(url: str) -> bool:
@@ -434,7 +650,8 @@ def buffered_response_downloads(
 ) -> Generator[Tuple[str, Response], None, None]:
     "Download queue consumer, returns full Response objects."
     config = options.config if options else DEFAULT_CONFIG
-    worker = partial(fetch_response, config=config)
+    render_mode = options.render if options else None
+    worker = partial(fetch_response, config=config, options=options, render=render_mode)
 
     return _buffered_downloads(bufferlist, download_threads, worker)
 
